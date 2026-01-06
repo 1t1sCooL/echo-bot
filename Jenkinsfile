@@ -1,26 +1,65 @@
 pipeline {
     agent any
+
     environment {
-        DOCKER_IMAGE = "1t1scool/echo-bot"
+        DOCKER_HUB_USER = '1t1scool' 
+        IMAGE_NAME = 'echo-bot'
+        IMAGE_TAG = "${BUILD_NUMBER}"
+        FULL_IMAGE = "${DOCKER_HUB_USER}/${IMAGE_NAME}:${IMAGE_TAG}"
+        LATEST_IMAGE = "${DOCKER_HUB_USER}/${IMAGE_NAME}:latest"
+        DOCKER_HUB_CREDS = 'dockerhub' 
     }
+
     stages {
+        stage('Checkout') {
+            steps {
+                checkout scm
+            }
+        }
+
         stage('Build & Push') {
             steps {
-                script {
-                    sh "docker build -t ${DOCKER_IMAGE}:${BUILD_NUMBER} -t ${DOCKER_IMAGE}:latest ."
-                    withCredentials([usernamePassword(credentialsId: 'docker-hub-credentials', passwordVariable: 'PASS', usernameVariable: 'USER')]) {
-                        sh "echo $PASS | docker login -u $USER --password-stdin"
-                        sh "docker push ${DOCKER_IMAGE}:${BUILD_NUMBER}"
-                        sh "docker push ${DOCKER_IMAGE}:latest"
-                    }
+                withCredentials([usernamePassword(credentialsId: "${DOCKER_HUB_CREDS}", 
+                                 usernameVariable: 'USER', 
+                                 passwordVariable: 'PASS')]) {
+                    sh """
+                        echo "🐳 Building Docker image..."
+                        docker build -t ${FULL_IMAGE} -t ${LATEST_IMAGE} .
+
+                        echo "🔑 Logging into Docker Hub..."
+                        echo \$PASS | docker login -u \$USER --password-stdin
+
+                        echo "📤 Pushing images..."
+                        docker push ${FULL_IMAGE}
+                        docker push ${LATEST_IMAGE}
+                    """
                 }
             }
         }
+
+        stage('Update Manifests') {
+            steps {
+                sh """
+                    echo "📝 Updating image tag in deployment.yaml..."
+                    sed -i "s|image: .*|image: ${FULL_IMAGE}|g" kubernetes/deployment.yaml
+                """
+            }
+        }
+
         stage('Deploy to K8s') {
             steps {
-                sh "sed -i 's|image: .*|image: ${DOCKER_IMAGE}:${BUILD_NUMBER}|g' kubernetes/deployment.yaml"
-                sh "kubectl apply -f kubernetes/deployment.yaml"
+                sh """
+                    echo "🚀 Deploying to Kubernetes..."
+                    kubectl apply -f kubernetes/deployment.yaml
+                """
             }
+        }
+    }
+    
+    post {
+        always {
+            sh "docker logout" 
+            sh "docker rmi ${FULL_IMAGE} ${LATEST_IMAGE} || true"
         }
     }
 }
