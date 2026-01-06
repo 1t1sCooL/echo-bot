@@ -1,0 +1,23 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: echo-bot
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: echo-bot
+  template:
+    metadata:
+      labels:
+        app: echo-bot
+    spec:
+      containers:
+        - name: bot
+          image: 1t1scool/echo-bot:latest
+          env:
+            - name: BOT_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: tg-bot-token
+                  key: BOT_TOKEN
